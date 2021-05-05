@@ -1,0 +1,9 @@
+[Unit]
+Description=mara-xporter
+
+[Service]
+ExecStart=/usr/local/bin/mara-xporter
+
+[Install]
+WantedBy=network.target
+
