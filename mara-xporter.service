@@ -3,7 +3,7 @@ Description=mara-xporter
 
 [Service]
 ExecStart=/usr/local/bin/mara-xporter
+Restart=on-failure
 
 [Install]
 WantedBy=network.target
-
