@@ -26,6 +26,7 @@ type maraXCollector struct {
 	heating         *prometheus.Desc
 
 	serialPort io.ReadWriteCloser
+	serialOpts serial.OpenOptions
 }
 
 // maraXStatus is all the data returned by the Mara X serial UART port.
@@ -55,13 +56,12 @@ const (
 
 	coffeeMode = "C"
 	steamMode  = "V"
-
-	errReadTimeout = "timeout reading from serial device"
 )
 
 var (
-	serialDevice = flag.String("serial-dev", "/dev/serial0", "path to the serial device to read")
-	port         = flag.Int("port", 8080, "port for the http server to listen on")
+	serialDevice   = flag.String("serial-dev", "/dev/serial0", "path to the serial device to read")
+	port           = flag.Int("port", 8080, "port for the http server to listen on")
+	errReadTimeout = errors.New("timeout reading from serial device")
 )
 
 func newMaraXCollector() (*maraXCollector, error) {
@@ -80,6 +80,7 @@ func newMaraXCollector() (*maraXCollector, error) {
 
 	return &maraXCollector{
 		serialPort: port,
+		serialOpts: options,
 		info: prometheus.NewDesc(
 			"mara_x_info",
 			"Contains information about the Mara X machine.",
@@ -151,19 +152,38 @@ func main() {
 }
 
 func (collector *maraXCollector) collectDataFromSerial() (*maraXStatus, error) {
-	line, err := collector.readSerialLine()
-	if err != nil {
-		return nil, err
+	var err error
+
+	// as reading from serial can be very error-prone, we simply try 3 times
+	// until we return
+	for i := 0; i < 3; i++ {
+		var line []byte
+		line, err = collector.readSerialLine()
+		if err == nil {
+			return parseLine(line)
+		}
 	}
-	return parseLine(line)
+
+	return nil, err
 }
 
 func (collector *maraXCollector) readSerialLine() ([]byte, error) {
-	// TODO: add "warm up" phase when getting bad data in the beginning.
 	data, err := readLine(collector.serialPort, time.Second*1)
+	if errors.Is(err, errReadTimeout) {
+		log.Println("reopening serial port")
+		_ = collector.serialPort.Close()
+		// we try to reopen the serial device and read again
+		collector.serialPort, err = serial.Open(collector.serialOpts)
+		if err != nil {
+			return nil, fmt.Errorf("unable to reopen serial device at %s: %w", *serialDevice, err)
+		}
+		return readLine(collector.serialPort, time.Second*1)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("unable to read line: %w", err)
 	}
+
 	return data, nil
 }
 
@@ -245,6 +265,6 @@ func readLine(rwc io.ReadWriteCloser, timeout time.Duration) ([]byte, error) {
 	case err := <-e:
 		return nil, err
 	case <-time.After(timeout):
-		return nil, errors.New(errReadTimeout)
+		return nil, errReadTimeout
 	}
 }
