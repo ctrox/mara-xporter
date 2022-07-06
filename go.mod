@@ -1,4 +1,4 @@
-module gitlab.ctrox.dev/cyrill/mara-xporter
+module github.com/ctrox/mara-xporter
 
 go 1.16
 
